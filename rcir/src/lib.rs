@@ -12,6 +12,7 @@ pub fn run_election<'a, Iter1, SubIter: std::iter::IntoIterator + 'a, Vobj: 'a +
         let mut round_votes: HashMap<&Vobj, u32> = HashMap::new();
         // number of voters
         let mut num_voters: u32 = 0;
+        let mut eligible_voters: u32 = 0;
         // count the votes
         for voter in voters {
             let (num_voters_checked, overflow) = num_voters.overflowing_add(1);
@@ -21,6 +22,11 @@ pub fn run_election<'a, Iter1, SubIter: std::iter::IntoIterator + 'a, Vobj: 'a +
             num_voters = num_voters_checked;
             for vote in voter {
                 if !eliminated.contains_key(vote){
+                    let (eligible_voters_checked, overflow) = eligible_voters.overflowing_add(1);
+                    if overflow {
+                        return Err(ElectionError::Overflow);
+                    }
+                    eligible_voters = eligible_voters_checked;
                     let mut vc = round_votes.entry(vote).or_insert(0);
                     *vc = *vc + 1;
                     break;
@@ -38,7 +44,7 @@ pub fn run_election<'a, Iter1, SubIter: std::iter::IntoIterator + 'a, Vobj: 'a +
         // find the fifty percentile and see if we have a winner by majority
         // note: we need to make sure we don't overflow num_voters when getting
         // the fifty percentile
-        let (fifty_numerator, overflow) = num_voters.overflowing_add(1);
+        let (fifty_numerator, overflow) = eligible_voters.overflowing_add(1);
         if overflow {
             return Err(ElectionError::Overflow);
         }
@@ -198,6 +204,20 @@ mod tests {
         else {
             assert!(false);
         }
+    }
+
+    // regression test for issue #1
+    #[test]
+    fn exhausted_ballots_allow_winners() {
+        let voters = vec![
+            vec!["alice"],
+            vec!["alice"],
+            vec!["sue"],
+            vec!["bill"],
+            vec!["bob"],
+        ];
+        let winner = run_election(&voters);
+        assert_eq!(winner.unwrap(), ElectionResult::Winner(&"alice"))
     }
 
     #[test]
