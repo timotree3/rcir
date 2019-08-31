@@ -1,301 +1,175 @@
-use std::error;
-use std::fmt;
-use std::collections::{HashMap, HashSet};
+#![deny(warnings)]
 
-pub fn run_election<'a, Iter1, SubIter: std::iter::IntoIterator + 'a, Vobj: 'a + std::cmp::Eq + std::hash::Hash>(voters: &'a Iter1, majority_mode: MajorityMode) -> Result<ElectionResult<Vobj>>
-    where &'a Iter1: IntoIterator<Item = &'a SubIter>, &'a SubIter: IntoIterator<Item = &'a Vobj>
-{
-    //contains the list of eliminated candidates
-    let mut eliminated: HashSet<&Vobj> = HashSet::new();
+type Ballot = std::vec::IntoIter<u64>;
+
+pub fn find_winners(ballots: Vec<Vec<u64>>) -> Vec<u64> {
+    use std::collections::HashMap;
+
+    // initialize candidate -> remaining voters map
+
+    let mut voter_map: HashMap<u64, Vec<Ballot>> = HashMap::new();
+    for ballot in ballots {
+        let mut ballot = ballot.into_iter();
+        if let Some(candidate) = ballot.next() {
+            voter_map.entry(candidate).or_default().push(ballot);
+        }
+    }
+
     loop {
-        // setup the vote data structure
-        let mut round_votes: HashMap<&Vobj, u32> = HashMap::new();
-        // number of voters
-        let mut num_voters: u32 = 0;
-        let mut saw_voters: bool = false;
-        // foreach voter
-        for voter in voters {
-            //set saw voters to give better error messaging
-            saw_voters = true;
-            //in CompleteMajority, we're always going to increase the votecounter, in remaining majority
-            //we're only going to increase the counter if this voter has a valid vote
-            let mut valid_vote = majority_mode == MajorityMode::CompleteMajority;
-            //foreach of those voters votes
-            for vote in voter {
-                if !eliminated.contains(vote){
-                    let mut vc = round_votes.entry(vote).or_insert(0);
-                    *vc = *vc + 1;
-                    valid_vote = true;
-                    break;
+        let mut iter = voter_map
+            .iter()
+            .map(|(candidate, voters)| (candidate, voters.len()));
+
+        // find best and worst candidates
+
+        let (mut best_candidate, mut best_votecount) = match iter.next() {
+            Some(pair) => pair,
+            // no voters present, return empty list
+            None => return Vec::new(),
+        };
+        let mut worst_candidates = vec![*best_candidate];
+        let mut worst_votecount = best_votecount;
+        let mut total_votecount = best_votecount;
+        for (candidate, votecount) in iter {
+            if votecount < worst_votecount {
+                worst_candidates.clear();
+                worst_votecount = votecount;
+            }
+            if votecount <= worst_votecount {
+                worst_candidates.push(*candidate);
+            } else if votecount > best_votecount {
+                best_candidate = candidate;
+                best_votecount = votecount;
+            }
+            total_votecount += votecount;
+        }
+
+        if best_votecount > total_votecount / 2 {
+            // a candidate has the remaining majority, return a single winner
+            return vec![*best_candidate];
+        }
+        if best_votecount == worst_votecount {
+            // all the remaining candidates are tied, return a tie between them
+            return worst_candidates;
+        }
+
+        // nobody has won yet, eliminate all the candidates tied for worst
+
+        for candidate in &worst_candidates {
+            let ballots_to_redistribute = voter_map.remove(candidate).unwrap();
+            for mut ballot in ballots_to_redistribute {
+                // find next remaining candidate on ballot, if any
+                //
+                // we can't use a for loop here because we reuse the iterator in the loop body
+                while let Some(target) = ballot.next() {
+                    if let Some(voters) = voter_map.get_mut(&target) {
+                        voters.push(ballot);
+                        break;
+                    }
                 }
             }
-            if valid_vote {
-                let (num_voters_checked, overflow) = num_voters.overflowing_add(1);
-                if overflow {
-                    return Err(ElectionError::Overflow);
-                }
-                num_voters = num_voters_checked;
-            }            
         }
-        // ensure that we had voters
-        if !saw_voters {
-            return Err(ElectionError::EmptyVoteCollection);
-        }
-        // essure that we had votes
-        if round_votes.is_empty() {
-            return Err(ElectionError::NoMajorityWinner)
-        }
-        // find the fifty percentile and see if we have a winner by majority
-        // note: we need to make sure we don't overflow num_voters when getting
-        // the fifty percentile
-        let (fifty_numerator, overflow) = num_voters.overflowing_add(1);
-        if overflow {
-            return Err(ElectionError::Overflow);
-        }
-        let fifty_percent = (fifty_numerator) / 2;
-        let mut winners = Vec::new();
-        for (v, votecount) in round_votes.iter() {
-            if *votecount >= fifty_percent {
-                winners.push(*v);
-            }
-        }
-        match winners.len() {
-            0 => {}
-            1 => {return Ok(ElectionResult::Winner(winners[0]));}
-            _ => { return Ok(ElectionResult::Tie(winners)); }
-        }
-        // if we don't have a majority we need to eliminate the 
-        // minimum vote getters
-        let mut add_elim = Vec::new();
-        let mut elim_count = u32::max_value();
-        for (v, votecount) in round_votes.iter() {
-            if *votecount < elim_count {
-                add_elim.clear();
-                add_elim.push(v);
-                elim_count = *votecount;
-            } else if *votecount == elim_count {
-                add_elim.push(v);
-            }
-        }
-        // add who to eliminate to the eliminated hashmap
-        for elim in add_elim {
-            eliminated.insert(elim);
-        }
-    }
-    //return Err(ElectionError::EmptyVoteCollection);
-}
-
-#[derive(Debug, PartialEq)]
-pub enum ElectionResult<'a, T: 'a> {
-    Winner(&'a T),
-    Tie(Vec<&'a T>),
-}
-
-#[derive(Debug, PartialEq)]
-pub enum MajorityMode {
-    CompleteMajority,
-    RemainingMajority
-}
-
-type Result<T> = std::result::Result<T, ElectionError>;
-#[derive(Debug, Clone, PartialEq)]
-pub enum ElectionError {
-    EmptyVoteCollection,
-    NoMajorityWinner,
-    Overflow,
-}
-impl fmt::Display for ElectionError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error with election input")
-    }
-}
-impl error::Error for ElectionError {
-    fn description(&self) -> &str {
-        match &self {
-            ElectionError::EmptyVoteCollection => {
-                "Vote Collection is empty"
-            },
-            ElectionError::NoMajorityWinner => {
-                "There were voters, but no votes"
-            }
-            ElectionError::Overflow => {
-                "An integer overflow occured"
-            }
-            // _ => {
-            //     "Other Error"
-            // }
-        }        
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        // Generic error, underlying cause isn't tracked.
-        None
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::VecDeque;
+mod test {
+    use super::find_winners;
 
     #[test]
-    fn basic_run() {
-        let mut voter_a = VecDeque::new();
-        voter_a.push_front("sue");
-        voter_a.push_front("bill");
-        voter_a.push_front("bob");
-
-        let mut voter_b = VecDeque::new();
-        voter_b.push_front("bill");
-        voter_b.push_front("bob");
-        voter_b.push_front("sue");
-
-        let mut voter_c = VecDeque::new();
-        voter_c.push_front("bob");
-        voter_c.push_front("sue");
-        voter_c.push_front("bill");
-
-        let mut voter_d = VecDeque::new();
-        voter_d.push_front("sue");
-        voter_d.push_front("bill");
-        voter_d.push_front("bob");
-
-        let mut voter_e = VecDeque::new();
-        voter_e.push_front("bill");
-        voter_e.push_front("bob");
-        voter_e.push_front("sue");
-
-        let vec = vec![voter_a, voter_b, voter_c, voter_d, voter_e];
-        let winner = run_election(&vec, MajorityMode::CompleteMajority);
-        //println!("{:?}", winner);
-        if let Ok(winner) = winner {
-            assert_eq!(ElectionResult::Winner(&"sue"), winner);
-        } else {
-            assert!(false);
-        }
-        //test again with remaining majority
-        let winner = run_election(&vec, MajorityMode::RemainingMajority);
-        //println!("{:?}", winner);
-        if let Ok(winner) = winner {
-            assert_eq!(ElectionResult::Winner(&"sue"), winner);
-        } else {
-            assert!(false);
-        }
-        //println!("winner is: {:?}", winner);
+    fn remaining_majority_wins() {
+        let ballots = vec![vec![0, 1], vec![0, 3], vec![2, 1], vec![3, 2], vec![1, 3]];
+        assert_eq!(&find_winners(ballots), &[0]);
     }
 
     #[test]
-    fn tie() {
-        let mut voter_a = VecDeque::new();
-        voter_a.push_front("sue");
-
-        let mut voter_b = VecDeque::new();
-        voter_b.push_front("bill");
-
-        let vec = vec![voter_a, voter_b];
-        let winner = run_election(&vec, MajorityMode::CompleteMajority);
-        if let Ok(ElectionResult::Tie(tie_res)) = winner {
-            assert!(tie_res.contains(&&"bill"));
-            assert!(tie_res.contains(&&"sue"));
-        }
-        else {
-            assert!(false);
-        }
-        let winner = run_election(&vec, MajorityMode::RemainingMajority);
-        if let Ok(ElectionResult::Tie(tie_res)) = winner {
-            assert!(tie_res.contains(&&"bill"));
-            assert!(tie_res.contains(&&"sue"));
-        }
-        else {
-            assert!(false);
-        }
+    fn first_round_absentees_never_win() {
+        let ballots = vec![vec![0, 4], vec![0, 4], vec![1, 4], vec![2, 4], vec![3, 4]];
+        assert_eq!(&find_winners(ballots), &[0]);
     }
 
     #[test]
-    fn tie2() {
-        let mut voter_a = VecDeque::new();
-        voter_a.push_front("sue");
-        voter_a.push_front("bill");
-
-        let mut voter_b = VecDeque::new();
-        voter_b.push_front("bill");
-        voter_b.push_front("sue");
-
-        let vec = vec![voter_a, voter_b];
-        let winner = run_election(&vec, MajorityMode::CompleteMajority);
-        if let Ok(ElectionResult::Tie(tie_res)) = winner {
-            assert!(tie_res.contains(&&"bill"));
-            assert!(tie_res.contains(&&"sue"));
-        }
-        else {
-            assert!(false);
-        }
-        let winner = run_election(&vec, MajorityMode::RemainingMajority);
-        if let Ok(ElectionResult::Tie(tie_res)) = winner {
-            assert!(tie_res.contains(&&"bill"));
-            assert!(tie_res.contains(&&"sue"));
-        }
-        else {
-            assert!(false);
-        }
+    fn no_ballots_produces_no_winner() {
+        let ballots = vec![];
+        assert_eq!(&find_winners(ballots), &[]);
     }
 
     #[test]
-    fn voters_no_votes() {
-        let voter_a: Vec<&str> = Vec::new();
-        let voter_b: Vec<&str> = Vec::new();
-        let voters = vec![voter_a, voter_b];
-        let winner = run_election(&voters, MajorityMode::CompleteMajority);
-        if let Err(error_res) = winner {
-            assert_eq!(error_res, ElectionError::NoMajorityWinner);
-        } else {
-            assert!(false);
-        }
-        let winner = run_election(&voters, MajorityMode::RemainingMajority);
-        if let Err(error_res) = winner {
-            assert_eq!(error_res, ElectionError::NoMajorityWinner);
-        } else {
-            assert!(false);
-        }
+    fn all_empty_ballots_produces_no_winner() {
+        let ballots = vec![vec![], vec![]];
+        assert_eq!(&find_winners(ballots), &[]);
     }
 
     #[test]
-    fn minority_majority() {
-        let mut voter_a = VecDeque::new();
-        voter_a.push_front("sam");
-        voter_a.push_front("alice");
+    fn initial_two_way_ties_work() {
+        let ballots = vec![
+            vec![0, 1, 2],
+            vec![0, 2, 1],
+            vec![0, 3, 3],
+            vec![1, 4, 5],
+            vec![1, 5, 0],
+            vec![1, 0, 4],
+        ];
+        let mut result = find_winners(ballots);
+        result.sort();
+        assert_eq!(&result, &[0, 1]);
+    }
 
-        let mut voter_b = VecDeque::new();
-        voter_b.push_front("sam");
-        voter_b.push_front("bob");
+    #[test]
+    fn initial_many_way_ties_work() {
+        let ballots = vec![
+            vec![0, 1, 2],
+            vec![0, 1, 2],
+            vec![1, 0, 2],
+            vec![1, 0, 2],
+            vec![2, 0, 1],
+            vec![2, 0, 1],
+            vec![3, 0, 2],
+            vec![3, 0, 2],
+            vec![4, 0, 2],
+            vec![4, 0, 2],
+        ];
+        let mut result = find_winners(ballots);
+        result.sort();
+        assert_eq!(&result, &[0, 1, 2, 3, 4]);
+    }
 
-        let mut voter_c = VecDeque::new();
-        voter_c.push_front("bob");
-        voter_c.push_front("chris");
+    #[test]
+    fn delayed_two_way_ties_work() {
+        let ballots = vec![
+            vec![0, 1],
+            vec![0, 2],
+            vec![1, 3],
+            vec![1, 4],
+            vec![2, 1],
+            vec![3, 0],
+        ];
+        let mut result = find_winners(ballots);
+        result.sort();
+        assert_eq!(&result, &[0, 1]);
+    }
 
-        let mut voter_d = VecDeque::new();
-        voter_d.push_front("chris");
-        voter_d.push_front("sam");
-
-        let mut voter_e = VecDeque::new();
-        voter_e.push_front("chris");
-        voter_e.push_front("alice");
-
-        let vec = vec![voter_a, voter_b, voter_c, voter_d, voter_e];
-        //run with complete majority mode
-        let winner = run_election(&vec, MajorityMode::CompleteMajority);
-        if let Err(error_res) = winner {
-            assert_eq!(error_res, ElectionError::NoMajorityWinner);
-        } else {
-            assert!(false);
-        }
-        //run with remaining majority mode
-        let winner = run_election(&vec, MajorityMode::RemainingMajority);
-        if let Ok(winner) = winner {
-            assert_eq!(ElectionResult::Winner(&"alice"), winner);
-        } else {
-            println!("{:?}", winner);
-            assert!(false);
-        }
+    #[test]
+    fn delayed_many_way_ties_work() {
+        let ballots = vec![
+            vec![0, 1],
+            vec![0, 2],
+            vec![0, 3],
+            vec![1, 4],
+            vec![1, 5],
+            vec![1, 6],
+            vec![2, 7],
+            vec![2, 8],
+            vec![2, 9],
+            vec![3, 0],
+            vec![3, 1],
+            vec![3, 2],
+            vec![4, 3],
+            vec![5, 4],
+            vec![4, 5],
+        ];
+        let mut result = find_winners(ballots);
+        result.sort();
+        assert_eq!(&result, &[0, 1, 2, 3, 4]);
     }
 }
