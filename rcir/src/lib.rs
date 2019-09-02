@@ -1,13 +1,15 @@
 #![deny(warnings)]
 
-type Ballot = std::vec::IntoIter<u64>;
-
-pub fn find_winners(ballots: Vec<Vec<u64>>) -> Vec<u64> {
+pub fn find_winners<I, B>(ballots: I) -> Vec<u64>
+where
+    I: IntoIterator<Item = B>,
+    B: IntoIterator<Item = u64>,
+{
     use std::collections::HashMap;
 
     // initialize candidate -> remaining voters map
 
-    let mut voter_map: HashMap<u64, Vec<Ballot>> = HashMap::new();
+    let mut voter_map: HashMap<u64, Vec<B::IntoIter>> = HashMap::new();
     for ballot in ballots {
         let mut ballot = ballot.into_iter();
         if let Some(candidate) = ballot.next() {
@@ -74,41 +76,56 @@ pub fn find_winners(ballots: Vec<Vec<u64>>) -> Vec<u64> {
 
 #[cfg(test)]
 mod test {
+    #[allow(unused_imports)]
+    use self::iter_assert::{deplete, neutral, undeplete};
+
     use super::find_winners;
 
     #[test]
     fn remaining_majority_wins() {
-        let ballots = vec![vec![0, 1], vec![0, 3], vec![2, 1], vec![3, 2], vec![1, 3]];
+        let ballots = vec![
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            deplete(vec![2, 1]),
+            deplete(vec![3, 2]),
+            deplete(vec![1, 3]),
+        ];
         assert_eq!(&find_winners(ballots), &[0]);
     }
 
     #[test]
     fn first_round_absentees_never_win() {
-        let ballots = vec![vec![0, 4], vec![0, 4], vec![1, 4], vec![2, 4], vec![3, 4]];
+        let ballots = vec![
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            deplete(vec![1, 4]),
+            deplete(vec![2, 4]),
+            deplete(vec![3, 4]),
+        ];
         assert_eq!(&find_winners(ballots), &[0]);
     }
 
     #[test]
     fn no_ballots_produces_no_winner() {
-        let ballots = vec![];
+        let ballots: Vec<Vec<u64>> = vec![];
         assert_eq!(&find_winners(ballots), &[]);
     }
 
     #[test]
     fn all_empty_ballots_produces_no_winner() {
-        let ballots = vec![vec![], vec![]];
+        let ballots = vec![deplete(vec![]), deplete(vec![])];
         assert_eq!(&find_winners(ballots), &[]);
     }
 
     #[test]
     fn initial_two_way_ties_work() {
         let ballots = vec![
-            vec![0, 1, 2],
-            vec![0, 2, 1],
-            vec![0, 3, 3],
-            vec![1, 4, 5],
-            vec![1, 5, 0],
-            vec![1, 0, 4],
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            undeplete(vec![1]),
+            undeplete(vec![1]),
+            undeplete(vec![1]),
         ];
         let mut result = find_winners(ballots);
         result.sort();
@@ -118,16 +135,16 @@ mod test {
     #[test]
     fn initial_many_way_ties_work() {
         let ballots = vec![
-            vec![0, 1, 2],
-            vec![0, 1, 2],
-            vec![1, 0, 2],
-            vec![1, 0, 2],
-            vec![2, 0, 1],
-            vec![2, 0, 1],
-            vec![3, 0, 2],
-            vec![3, 0, 2],
-            vec![4, 0, 2],
-            vec![4, 0, 2],
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            undeplete(vec![1]),
+            undeplete(vec![1]),
+            undeplete(vec![2]),
+            undeplete(vec![2]),
+            undeplete(vec![3]),
+            undeplete(vec![3]),
+            undeplete(vec![4]),
+            undeplete(vec![4]),
         ];
         let mut result = find_winners(ballots);
         result.sort();
@@ -137,12 +154,12 @@ mod test {
     #[test]
     fn delayed_two_way_ties_work() {
         let ballots = vec![
-            vec![0, 1],
-            vec![0, 2],
-            vec![1, 3],
-            vec![1, 4],
-            vec![2, 1],
-            vec![3, 0],
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            undeplete(vec![1]),
+            undeplete(vec![1]),
+            undeplete(vec![2, 1]),
+            undeplete(vec![3, 0]),
         ];
         let mut result = find_winners(ballots);
         result.sort();
@@ -152,24 +169,161 @@ mod test {
     #[test]
     fn delayed_many_way_ties_work() {
         let ballots = vec![
-            vec![0, 1],
-            vec![0, 2],
-            vec![0, 3],
-            vec![1, 4],
-            vec![1, 5],
-            vec![1, 6],
-            vec![2, 7],
-            vec![2, 8],
-            vec![2, 9],
-            vec![3, 0],
-            vec![3, 1],
-            vec![3, 2],
-            vec![4, 3],
-            vec![5, 4],
-            vec![4, 5],
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            undeplete(vec![1]),
+            undeplete(vec![1]),
+            undeplete(vec![1]),
+            undeplete(vec![2]),
+            undeplete(vec![2]),
+            undeplete(vec![2]),
+            undeplete(vec![3]),
+            undeplete(vec![3]),
+            undeplete(vec![3]),
+            undeplete(vec![4]),
+            undeplete(vec![4]),
+            undeplete(vec![5, 4]),
+            deplete(vec![6, 5]),
         ];
         let mut result = find_winners(ballots);
         result.sort();
         assert_eq!(&result, &[0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn votes_count_behind_two_eliminations() {
+        let ballots = vec![
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            undeplete(vec![1, 2, 0]),
+            undeplete(vec![4]),
+            undeplete(vec![4]),
+        ];
+        assert_eq!(&find_winners(ballots), &[0]);
+    }
+
+    // iterator testing helper functions to assert how far they will be polled
+    mod iter_assert {
+        use std::fmt::Debug;
+
+        /// Wraps an Iterator to assert that it will be polled to completion.
+        ///
+        /// # Panics
+        ///
+        /// Panics if the returned wrapper is dropped before it is polled to produce a None.
+        ///
+        /// # Examples
+        ///
+        /// ```norun
+        /// {
+        ///     let mut iter = deplete(vec![3, 4, 5]);
+        ///     println!("{:?}", iter.next()); // 3
+        ///     println!("{:?}", iter.next()); // 4
+        /// } // panic: iterator dropped before polled to completion
+        ///
+        /// println!("this line of code never runs :(");
+        /// ```
+        pub fn deplete<'a, V, I, A>(iter: V) -> IterAssert<I>
+        where
+            V: IntoIterator<Item = A, IntoIter = I> + 'a,
+            I: Iterator<Item = A> + Debug,
+        {
+            IterAssert::<I> {
+                inner: iter.into_iter(),
+                kind: NeedsDeplete,
+            }
+        }
+
+        /// Wraps an Iterator to assert that it will never be polled to completion.
+        ///
+        /// # Panics
+        ///
+        /// Panics if the returned wrapper is polled to produce a None.
+        ///
+        /// # Examples
+        ///
+        /// ```norun
+        /// let mut iter = undeplete(vec![3, 4, 5]);
+        /// println!("{:?}", iter.next()); // 3
+        /// println!("{:?}", iter.next()); // 4
+        /// println!("{:?}", iter.next()); // 5
+        /// println!("{:?}", iter.next()); // panic: iterator polled to completion
+        /// ```
+        pub fn undeplete<'a, V, I, A>(iter: V) -> IterAssert<I>
+        where
+            V: IntoIterator<Item = A, IntoIter = I> + 'a,
+            I: Iterator<Item = A> + Debug,
+        {
+            IterAssert::<I> {
+                inner: iter.into_iter(),
+                kind: Undeplete,
+            }
+        }
+
+        /// Wraps an iterator, doing nothing in addition.
+        /// To be used amongst other wrapped iterators to make them the same type.
+        ///
+        /// # Examples
+        ///
+        /// ```norun
+        /// let iters: Vec<IterAssert<_>> = vec![
+        ///     neutral(vec![1, 2, 3]),
+        ///     deplete(vec![4, 5, 6]),
+        ///     undeplete(vec![7, 8, 9]),
+        /// ];
+        /// ```
+        #[allow(dead_code)]
+        pub fn neutral<'a, V, I, A>(iter: V) -> IterAssert<I>
+        where
+            V: IntoIterator<Item = A, IntoIter = I> + 'a,
+            I: Iterator<Item = A> + Debug,
+        {
+            IterAssert::<I> {
+                inner: iter.into_iter(),
+                kind: Satisfied,
+            }
+        }
+
+        #[derive(Debug)]
+        pub struct IterAssert<I> {
+            inner: I,
+            kind: IterAssertKind,
+        }
+
+        use self::IterAssertKind::*;
+
+        #[derive(Debug)]
+        enum IterAssertKind {
+            Satisfied,
+            NeedsDeplete,
+            Undeplete,
+        }
+
+        impl<I: Iterator<Item = A>, A> Iterator for IterAssert<I> {
+            type Item = A;
+
+            fn next(&mut self) -> Option<A> {
+                let next = self.inner.next();
+                if next.is_none() {
+                    match self.kind {
+                        NeedsDeplete => self.kind = Satisfied,
+                        Undeplete => panic!("iterator polled to completion"),
+                        _ => {}
+                    }
+                }
+                next
+            }
+        }
+
+        impl<I> Drop for IterAssert<I> {
+            fn drop(&mut self) {
+                if let NeedsDeplete = self.kind {
+                    if !std::thread::panicking() {
+                        panic!("iterator dropped before polled to completion")
+                    }
+                }
+            }
+        }
     }
 }
