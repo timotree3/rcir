@@ -1,15 +1,16 @@
 #![deny(warnings)]
 
-pub fn find_winners<I, B>(ballots: I) -> Vec<u64>
+pub fn find_winners<I, B, C>(ballots: I) -> Vec<C>
 where
     I: IntoIterator<Item = B>,
-    B: IntoIterator<Item = u64>,
+    B: IntoIterator<Item = C>,
+    C: Clone + std::hash::Hash + Eq,
 {
     use std::collections::HashMap;
 
     // initialize candidate -> remaining voters map
 
-    let mut voter_map: HashMap<u64, Vec<B::IntoIter>> = HashMap::new();
+    let mut voter_map: HashMap<C, Vec<B::IntoIter>> = HashMap::new();
     for ballot in ballots {
         let mut ballot = ballot.into_iter();
         if let Some(candidate) = ballot.next() {
@@ -29,7 +30,7 @@ where
             // no voters present, return empty list
             None => return Vec::new(),
         };
-        let mut worst_candidates = vec![*best_candidate];
+        let mut worst_candidates = vec![best_candidate];
         let mut worst_votecount = best_votecount;
         let mut total_votecount = best_votecount;
         for (candidate, votecount) in iter {
@@ -38,7 +39,7 @@ where
                 worst_votecount = votecount;
             }
             if votecount <= worst_votecount {
-                worst_candidates.push(*candidate);
+                worst_candidates.push(candidate);
             } else if votecount > best_votecount {
                 best_candidate = candidate;
                 best_votecount = votecount;
@@ -48,8 +49,10 @@ where
 
         if best_votecount > total_votecount / 2 {
             // a candidate has the remaining majority, return a single winner
-            return vec![*best_candidate];
+            return vec![best_candidate.clone()];
         }
+
+        let worst_candidates = worst_candidates.into_iter().cloned().collect();
         if best_votecount == worst_votecount {
             // all the remaining candidates are tied, return a tie between them
             return worst_candidates;
@@ -113,7 +116,7 @@ mod test {
 
     #[test]
     fn all_empty_ballots_produces_no_winner() {
-        let ballots = vec![deplete(vec![]), deplete(vec![])];
+        let ballots = vec![deplete(vec![] as Vec<u64>), deplete(vec![])];
         assert_eq!(&find_winners(ballots), &[]);
     }
 
@@ -193,6 +196,34 @@ mod test {
 
     #[test]
     fn votes_count_behind_two_eliminations() {
+        let ballots = vec![
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            undeplete(vec![1, 2, 0]),
+            undeplete(vec![4]),
+            undeplete(vec![4]),
+        ];
+        assert_eq!(&find_winners(ballots), &[0]);
+    }
+
+    #[test]
+    fn reference_candidates_work() {
+        let a = "a";
+        let b = "b";
+        let c = "c";
+        let d = "d";
+        let ballots = vec![
+            undeplete(vec![a]),
+            undeplete(vec![a]),
+            undeplete(vec![c, d, a]),
+            undeplete(vec![b]),
+            undeplete(vec![b]),
+        ];
+        assert_eq!(&find_winners(ballots), &[a]);
+    }
+
+    #[test]
+    fn vecs_passed_by_reference_work() {
         let ballots = vec![
             undeplete(vec![0]),
             undeplete(vec![0]),
