@@ -79,6 +79,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
+
     #[allow(unused_imports)]
     use self::iter_assert::{deplete, neutral, undeplete};
 
@@ -130,9 +132,10 @@ mod test {
             undeplete(vec![1]),
             undeplete(vec![1]),
         ];
-        let mut result = find_winners(ballots);
-        result.sort();
-        assert_eq!(&result, &[0, 1]);
+        assert_eq!(
+            find_winners(ballots).iter().collect::<HashSet<_>>(),
+            [0, 1].iter().collect::<HashSet<_>>()
+        );
     }
 
     #[test]
@@ -149,9 +152,10 @@ mod test {
             undeplete(vec![4]),
             undeplete(vec![4]),
         ];
-        let mut result = find_winners(ballots);
-        result.sort();
-        assert_eq!(&result, &[0, 1, 2, 3, 4]);
+        assert_eq!(
+            find_winners(ballots).iter().collect::<HashSet<_>>(),
+            [0, 1, 2, 3, 4].iter().collect::<HashSet<_>>()
+        );
     }
 
     #[test]
@@ -164,9 +168,10 @@ mod test {
             undeplete(vec![2, 1]),
             undeplete(vec![3, 0]),
         ];
-        let mut result = find_winners(ballots);
-        result.sort();
-        assert_eq!(&result, &[0, 1]);
+        assert_eq!(
+            find_winners(ballots).iter().collect::<HashSet<_>>(),
+            [0, 1].iter().collect::<HashSet<_>>()
+        );
     }
 
     #[test]
@@ -189,9 +194,10 @@ mod test {
             undeplete(vec![5, 4]),
             deplete(vec![6, 5]),
         ];
-        let mut result = find_winners(ballots);
-        result.sort();
-        assert_eq!(&result, &[0, 1, 2, 3, 4]);
+        assert_eq!(
+            find_winners(ballots).iter().collect::<HashSet<_>>(),
+            [0, 1, 2, 3, 4].iter().collect::<HashSet<_>>()
+        );
     }
 
     #[test]
