@@ -19,6 +19,10 @@
 /// where V is the number of observable votes
 /// and C is the number of first round candidates
 ///
+/// # Panics
+///
+/// This function panics if it is given more than `std::usize::MAX` ballots.
+///
 /// # Examples
 ///
 /// Basic usage
@@ -100,7 +104,9 @@ where
                 best_candidate = candidate;
                 best_votecount = votecount;
             }
-            total_votecount += votecount;
+            total_votecount = total_votecount
+                .checked_add(votecount)
+                .expect("number of ballots to be less than usize::MAX");
         }
 
         if best_votecount > total_votecount / 2 {
