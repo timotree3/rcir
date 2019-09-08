@@ -1,5 +1,61 @@
 #![deny(warnings)]
 
+/// Runs an RCIR election, resolving ties by acting equally upon the tied candidates
+///
+/// Takes an iterator of ballots where each ballot ranks candidates,
+/// starting with first choice and ending with last. If some candidates tie, returns
+/// a vector containing all of them. If all ballots are empty, returns an empty vector.
+///
+/// The candidate type must be `Clone` because of a quirk in `HashMap`. Most users are
+/// expected to have candidate IDs as integers or candidates as references in which
+/// case this is perfectly convenient.
+///
+/// # Time Complexity
+///
+/// The worst-case scenario for this algorithm is when the candidates are close
+/// enough that the voting makes it to a round of two.
+///
+/// In that case, the time complexitiy for this algorithm is O(V+(C^2))
+/// where V is the number of observable votes
+/// and C is the number of first round candidates
+///
+/// # Examples
+///
+/// Basic usage
+///
+/// ```rust
+/// # use rcir::find_winners;
+/// // this election contains six votes
+/// // four observable votes
+/// // and two first round candidates
+///
+/// let ballots = vec![
+///     vec![0, 3],
+///     vec![0, 3],
+/// // the 3s above are unobservable because they are ranked after
+/// // a vote for the winner
+///
+///     vec![1, 2],
+/// ];
+///
+/// assert_eq!(&find_winners(ballots), &[0]);
+///
+/// // this election contains eight votes
+/// // eight observable votes
+/// // and four first round candidates
+///
+/// let ballots = vec![
+///     vec![0],
+///     vec![0],
+///
+/// // these three candidates get eliminated because they are tied with each other
+///     vec![2, 1],
+///     vec![3, 2],
+///     vec![1, 3],
+/// ];
+///
+/// assert_eq!(&find_winners(ballots), &[0]);
+/// ```
 pub fn find_winners<I, B, C>(ballots: I) -> Vec<C>
 where
     I: IntoIterator<Item = B>,
