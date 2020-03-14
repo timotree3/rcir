@@ -302,6 +302,28 @@ mod test {
         assert_eq!(&find_winners(ballots), &[0]);
     }
 
+    // In some initial versions of the "majority found" early-exit logic,
+    // it counted exactly half of the votes as a uniquely winning majority.
+    //
+    // This tests that we don't exit early on exactly half votes and
+    // instead wait until later to see if another candidate gains half votes
+    // as well such that we arrive at a two way tie.
+    #[test]
+    fn initally_half_later_two_way_tie() {
+        let ballots = vec![
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            undeplete(vec![0]),
+            undeplete(vec![1]),
+            undeplete(vec![1]),
+            undeplete(vec![2, 1]),
+        ];
+        assert_eq!(
+            find_winners(ballots).iter().collect::<HashSet<_>>(),
+            [0, 1].iter().collect::<HashSet<_>>()
+        );
+    }
+
     // iterator testing helper functions to assert how far they will be polled
     mod iter_assert {
         use std::fmt::Debug;
