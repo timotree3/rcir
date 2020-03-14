@@ -1,14 +1,12 @@
 #![deny(warnings)]
 
+use std::{collections::HashMap, hash::Hash};
+
 /// Runs an RCIR election, resolving ties by acting equally upon the tied candidates
 ///
 /// Takes an iterator of ballots where each ballot ranks candidates,
 /// starting with first choice and ending with last. If some candidates tie, returns
 /// a vector containing all of them. If all ballots are empty, returns an empty vector.
-///
-/// The candidate type must be `Clone` because of a quirk in `HashMap`. Most users are
-/// expected to have candidate IDs as integers or candidates as references in which
-/// case this is perfectly convenient.
 ///
 /// # Time Complexity
 ///
@@ -64,10 +62,8 @@ pub fn find_winners<I, B, C>(ballots: I) -> Vec<C>
 where
     I: IntoIterator<Item = B>,
     B: IntoIterator<Item = C>,
-    C: Clone + std::hash::Hash + Eq,
+    C: std::hash::Hash + Eq,
 {
-    use std::collections::HashMap;
-
     // initialize candidate -> remaining voters map
 
     let mut voter_map: HashMap<C, Vec<B::IntoIter>> = HashMap::new();
@@ -79,29 +75,19 @@ where
     }
 
     loop {
-        let mut iter = voter_map
-            .iter()
-            .map(|(candidate, voters)| (candidate, voters.len()));
+        let mut votecounts = voter_map.values().map(|voters| voters.len());
 
-        // find best and worst candidates
-
-        let (mut best_candidate, mut best_votecount) = match iter.next() {
-            Some(pair) => pair,
+        let mut best_votecount = match votecounts.next() {
+            Some(votecount) => votecount,
             // no voters present, return empty list
             None => return Vec::new(),
         };
-        let mut worst_candidates = vec![best_candidate];
         let mut worst_votecount = best_votecount;
         let mut total_votecount = best_votecount;
-        for (candidate, votecount) in iter {
+        for votecount in votecounts {
             if votecount < worst_votecount {
-                worst_candidates.clear();
                 worst_votecount = votecount;
-            }
-            if votecount <= worst_votecount {
-                worst_candidates.push(candidate);
             } else if votecount > best_votecount {
-                best_candidate = candidate;
                 best_votecount = votecount;
             }
             total_votecount = total_votecount
@@ -111,23 +97,37 @@ where
 
         if best_votecount > total_votecount / 2 {
             // a candidate has the remaining majority, return a single winner
-            return vec![best_candidate.clone()];
+            let mut winners = voter_map
+                .into_iter()
+                .filter(|(_candidate, voters)| voters.len() == best_votecount);
+            let (winner, _votecount) = winners
+                .next()
+                .expect("candidate with best votecount to remain in voter map");
+            debug_assert!(winners.next().is_none());
+            return vec![winner];
         }
 
-        let worst_candidates = worst_candidates.into_iter().cloned().collect();
         if best_votecount == worst_votecount {
             // all the remaining candidates are tied, return a tie between them
-            return worst_candidates;
+            let winners = voter_map
+                .into_iter()
+                .map(|(candidate, _voters)| candidate)
+                .collect();
+            return winners;
         }
 
         // nobody has won yet, eliminate all the candidates tied for worst
 
-        for candidate in &worst_candidates {
-            let ballots_to_redistribute = voter_map.remove(candidate).unwrap();
-            for mut ballot in ballots_to_redistribute {
+        let worst_candidates = hash_map_drain_filter(&mut voter_map, |(_candidate, voters)| {
+            voters.len() == worst_votecount
+        });
+
+        for (_candidate, voters) in worst_candidates {
+            for mut ballot in voters {
                 // find next remaining candidate on ballot, if any
                 //
-                // we can't use a for loop here because we reuse the iterator in the loop body
+                // we can't use a for loop here because we reuse the iterator
+                // in the loop body
                 while let Some(target) = ballot.next() {
                     if let Some(voters) = voter_map.get_mut(&target) {
                         voters.push(ballot);
@@ -137,6 +137,28 @@ where
             }
         }
     }
+}
+
+// FIXME: replace with HashMap::drain_filter once it exists/is stable
+fn hash_map_drain_filter<K: Hash + Eq, V, F: FnMut(&mut (K, V)) -> bool>(
+    map: &mut HashMap<K, V>,
+    mut should_drain: F,
+) -> Vec<(K, V)> {
+    let mut vec = Vec::new();
+    let owned_map = std::mem::replace(map, HashMap::default());
+    let owned_map = owned_map
+        .into_iter()
+        .filter_map(|mut entry| {
+            if should_drain(&mut entry) {
+                vec.push(entry);
+                None
+            } else {
+                Some(entry)
+            }
+        })
+        .collect();
+    std::mem::replace(map, owned_map);
+    vec
 }
 
 #[cfg(test)]
