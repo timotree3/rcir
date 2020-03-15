@@ -8,6 +8,8 @@ use std::{collections::HashMap, hash::Hash};
 /// starting with first choice and ending with last. If some candidates tie, returns
 /// a vector containing all of them. If all ballots are empty, returns an empty vector.
 ///
+/// It is a logic error if `ballots` produces more than `usize::MAX` elements.
+///
 /// # Time Complexity
 ///
 /// The worst-case scenario for this algorithm is when the candidates are close
@@ -16,10 +18,6 @@ use std::{collections::HashMap, hash::Hash};
 /// In that case, the time complexitiy for this algorithm is O(V+(C^2))
 /// where V is the number of observable votes
 /// and C is the number of first round candidates
-///
-/// # Panics
-///
-/// This function panics if it is given more than `std::usize::MAX` ballots.
 ///
 /// # Examples
 ///
@@ -75,25 +73,20 @@ where
     }
 
     loop {
-        let mut votecounts = voter_map.values().map(|voters| voters.len());
+        let votecounts = voter_map.values().map(|voters| voters.len());
 
-        let mut best_votecount = match votecounts.next() {
-            Some(votecount) => votecount,
+        let best_votecount = votecounts.clone().max();
+        let worst_votecount = votecounts.clone().min();
+
+        let (best_votecount, worst_votecount) = match (best_votecount, worst_votecount) {
+            (Some(b), Some(w)) => (b, w),
             // no voters present, return empty list
-            None => return Vec::new(),
+            (None, None) => return Vec::new(),
+            _ => unreachable!("if Iterator::min() returns Some(v), so should Iterator::max()"),
         };
-        let mut worst_votecount = best_votecount;
-        let mut total_votecount = best_votecount;
-        for votecount in votecounts {
-            if votecount < worst_votecount {
-                worst_votecount = votecount;
-            } else if votecount > best_votecount {
-                best_votecount = votecount;
-            }
-            total_votecount = total_votecount
-                .checked_add(votecount)
-                .expect("number of ballots to be less than usize::MAX");
-        }
+
+        // here we assume overflow doesn't occur, see the `fn` level docs
+        let total_votecount: usize = votecounts.sum();
 
         if best_votecount > total_votecount / 2 {
             // a candidate has the remaining majority, return a single winner
